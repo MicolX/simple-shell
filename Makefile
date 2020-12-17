@@ -1,6 +1,6 @@
-CFLAGS = -Wall -Wextra -Werror
+CFLAGS = -g -Wall -Wextra -Werror
 EXE = sish
-OBJS = main.o
+OBJS = main.o util.o
 
 all: ${EXE}
 

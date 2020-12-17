@@ -1,18 +1,11 @@
 #include "main.h"
 
-char *
-getinput(char *buffer, size_t buflen) {
-	printf("sish$ ");
-	return fgets(buffer, buflen, stdin);
-}
-
+int status;
 
 int
 main(int argc, char **argv) {
-	char buf[BUFSIZ], opt;
-	pid_t pid;
-	int opt_c, opt_x, status;
-	struct passwd *pw;
+	char buf[BUFSIZ], opt, *builtin, shell[BUFSIZ];
+	int opt_c, opt_x;
 
 	if (signal(SIGINT, SIG_IGN) == SIG_ERR) {
 		err(EXIT_FAILURE, "failed to set SIG_IGN to SIGINT signal\n");
@@ -24,6 +17,11 @@ main(int argc, char **argv) {
 
 	if (signal(SIGTSTP, SIG_IGN) == SIG_ERR) {
 		err(EXIT_FAILURE, "failed to set SIG_IGN to SIGTSTP signal\n");
+	}
+
+	snprintf(shell, BUFSIZ, "%s/%s", getcwd(NULL, MAXPATHLEN), argv[0]+2);
+	if (setenv("SHELL", shell, 1) == -1) {
+		err(EXIT_FAILURE, "failed to set $SHELL: %s\n", strerror(errno));
 	}
 
 	while ((opt = getopt(argc, argv, "c:x")) != -1) {
@@ -46,20 +44,8 @@ main(int argc, char **argv) {
 	}
 
 	if (opt_c && optarg != NULL) {
-		if ((pid = fork()) == -1) {
-			err(EXIT_FAILURE, "sish: can't fork: %s\n", strerror(errno));
-		} else if (pid == 0) {
-			execlp(optarg, optarg, (char *)0);
-			err(EXIT_FAILURE, "sish: couldn't exec %s: %s\n", optarg, strerror(errno));
-			exit(127);
-		}
-
-		if (wait(&status) == -1) {
-			perror("failed at wait\n");
-		}
-
-		if (status != EXIT_SUCCESS) {
-			exit(127);
+		if (execute(optarg) != EXIT_SUCCESS) {
+			exit(ERROR);
 		}
 
 		exit(EXIT_SUCCESS);
@@ -73,42 +59,17 @@ main(int argc, char **argv) {
 			fprintf(stderr, "+ %s\n", buf);
 		}
 
-		if (strlen(buf) == 4 && strncmp(buf, "exit", 4) == 0) {
+		char *line = strdup(buf);
+		builtin = strsep(&line, " \t");
+
+		if (strlen(builtin) == 4 && strncmp(builtin, "exit", 4) == 0) {
 			exit(EXIT_SUCCESS);
-		}
-
-		if (strncmp(buf, "cd", 2) == 0) {
-			char *cd = strdup(buf);
-			(void)strsep(&cd, " \t");
-			if (cd == NULL) {
-				if ((pw = getpwuid(getuid())) == NULL) {
-					fprintf(stderr, "failed to get passwd\n");
-				}
-				if (chdir(pw->pw_dir) != 0) {
-					fprintf(stderr, "cd: can't cd to %s\n", pw->pw_dir);
-				}
-			} else {
-				if (chdir(cd) != 0) {
-					fprintf(stderr, "cd: can't cd to %s\n", cd);
-				}
-			}
-			continue;
-		}
-
-		if ((pid = fork()) == -1) {
-			err(EXIT_FAILURE, "sish: can't fork: %s\n", strerror(errno));
-		} else if (pid == 0) {
-			execlp(buf, buf, (char *)0);
-			err(EXIT_FAILURE, "sish: couldn't exec %s: %s\n", buf, strerror(errno));
-			exit(127);
-		}
-		
-		if (wait(&status) == -1) {
-			perror("failed at wait\n");
-		}
-
-		if (!WIFEXITED(status)) {
-			exit(127);
+		} else if (strlen(builtin) == 2 && strncmp(buf, "cd", 2) == 0) {
+			status = cd(line);
+		} else if (strlen(builtin) == 4 && strncmp(buf, "echo", 4) == 0) {
+			status = echo(line);
+		} else {
+			status = execute(buf);
 		}
 	}
 
