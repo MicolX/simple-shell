@@ -13,3 +13,4 @@
 3. -x mode also need to modified
 4. now I know why we need to tokenize the string, but still not sure about the
 right way to do it
+5. move some code into the util
