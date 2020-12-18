@@ -14,3 +14,7 @@
 4. now I know why we need to tokenize the string, but still not sure about the
 right way to do it
 5. move some code into the util
+
+---- 12.19.2020 ----
+1. Through so many hours, I finally got the pipes done!!!! Exciting!!
+

@@ -13,12 +13,14 @@
 #define UTIL_H
 
 #define ERROR 127
+#define MAXTOKENS 128
 
 extern int status;
 
 #endif
 
 char *getinput(char *, size_t);
-int execute(char *);
+int execute(char *, int, int);
 int cd(char *);
 int echo(char *);
+int getparam(char *, char **, int, const char *);

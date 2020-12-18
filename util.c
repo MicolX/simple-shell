@@ -1,6 +1,5 @@
 #include "util.h"
 
-#define ERROR 127
 
 int status;
 
@@ -26,13 +25,55 @@ dollar(char **str) {
 }
 
 int
-execute(char *command) {
+getparam(char *command, char **argv, int len, const char *sep) {
+	if (command == NULL || strlen(command) == 0) return 0;
+
+	char *p;
+	int i = 0;
+	
+	for ((p = strtok(command, sep)); p; (p = strtok(NULL, sep)), i++) {
+		if (i < len - 1) {
+			while (p[0] == ' ' || p[0] == '\t') p++;
+			while (p[strlen(p) - 1] == ' ') p[strlen(p) - 1] = '\0';
+			argv[i] = p;
+		} else {
+			return -1;
+		}
+	}
+	argv[i] = NULL;
+	return i;
+}
+
+int
+execute(char *command, int in, int out) {
 	pid_t pid;
+	char *args[MAXTOKENS];
+
+    if (getparam(command, args, MAXTOKENS, " ") == -1) {
+		perror("Invalid syntax: too many arguments\n");
+		return ERROR;
+	}
 
 	if ((pid = fork()) == -1) {
 		fprintf(stderr, "sish: can't fork: %s\n", strerror(errno));
 	} else if (pid == 0) {
-		execlp(command, command, (char *)0);
+		if (in != STDIN_FILENO) {
+			if (dup2(in, STDIN_FILENO) == -1) {
+				perror("dup failed during execution\n");
+				exit(ERROR);
+			}
+			(void)close(in);
+		}
+
+		if (out != STDOUT_FILENO) {
+			if (dup2(out, STDOUT_FILENO) == -1) {
+				perror("dup failed during execution\n");
+				exit(ERROR);
+			}
+			(void)close(out);
+		}
+
+		execvp(args[0], args);
 		fprintf(stderr, "sish: couldn't exec %s: %s\n", command, strerror(errno));
 		exit(ERROR);
 	}
@@ -41,6 +82,12 @@ execute(char *command) {
 		perror("failed at wait\n");
 		status = ERROR;
 	}
+//	if (out == STDOUT_FILENO) {
+//		if (wait(&status) == -1) {
+//			perror("failed at wait\n");
+//			status = ERROR;
+//		}
+//	}
 
 	if (status != EXIT_SUCCESS) {
 		status = ERROR;
@@ -115,6 +162,7 @@ echo(char *str) {
 			return EXIT_FAILURE;
 		}
 	
+		(void)strlcat(str, "\n", 2);
 		if (write(fd, left, strlen(left)) != (signed int)strlen(left)) {
 			fprintf(stderr, "error writing to %s: %s\n", str, strerror(errno));
 			return EXIT_FAILURE;

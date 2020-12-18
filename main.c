@@ -5,7 +5,7 @@ int status;
 int
 main(int argc, char **argv) {
 	char buf[BUFSIZ], opt, *builtin, shell[BUFSIZ];
-	int opt_c, opt_x;
+	int opt_c, opt_x, pcount = 0, fd[2];
 
 	if (signal(SIGINT, SIG_IGN) == SIG_ERR) {
 		err(EXIT_FAILURE, "failed to set SIG_IGN to SIGINT signal\n");
@@ -24,13 +24,13 @@ main(int argc, char **argv) {
 		err(EXIT_FAILURE, "failed to set $SHELL: %s\n", strerror(errno));
 	}
 
-	while ((opt = getopt(argc, argv, "c:x")) != -1) {
+	while ((opt = getopt(argc, argv, "xc:")) != -1) {
 		switch (opt) {
 			case 'c':
 				opt_c = 1;
 			
 				if (optarg == NULL) {
-					printf("sish [-x] [-c command]\n");
+					printf("Usage: sish [-x] [-c command]\n");
 				}
 				break;
 			
@@ -44,7 +44,7 @@ main(int argc, char **argv) {
 	}
 
 	if (opt_c && optarg != NULL) {
-		if (execute(optarg) != EXIT_SUCCESS) {
+		if (execute(optarg, STDIN_FILENO, STDOUT_FILENO) != EXIT_SUCCESS) {
 			exit(ERROR);
 		}
 
@@ -52,11 +52,21 @@ main(int argc, char **argv) {
 	}
 
 	while (getinput(buf, BUFSIZ)) {
-		
+		if (strlen(buf) == 1) continue;
+
+		char *pipes[MAXTOKENS];
+
 		buf[strlen(buf)-1] = '\0';
 
+		if ((pcount = getparam(buf, pipes, MAXTOKENS, "|")) == -1) {
+			perror("command is too long\n");
+			status = ERROR;
+		}
+
 		if (opt_x == 1) {
-			fprintf(stderr, "+ %s\n", buf);
+			for (int i = 0; pipes[i]; i++) {
+				fprintf(stderr, "+ %s\n", pipes[i]);
+			}
 		}
 
 		char *line = strdup(buf);
@@ -69,8 +79,25 @@ main(int argc, char **argv) {
 		} else if (strlen(builtin) == 4 && strncmp(buf, "echo", 4) == 0) {
 			status = echo(line);
 		} else {
-			status = execute(buf);
-		}
+			int in = STDIN_FILENO;
+			int i = 0;
+			while (i < pcount - 1) {
+				if (pipe(fd) == -1) {
+					fprintf(stderr, "failed to pipe in main: %s\n", strerror(errno));
+					break;
+				}
+
+				if ((status = execute(pipes[i], in, fd[1])) != EXIT_SUCCESS) {
+					break;
+				}
+
+				(void)close(fd[1]);
+				in = fd[0];
+				i++;
+			}
+
+			status = execute(pipes[i], in, STDOUT_FILENO);
+		}	
 	}
 
 	exit(EXIT_SUCCESS);
