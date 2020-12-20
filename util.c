@@ -1,5 +1,10 @@
 #include "util.h"
 
+typedef enum Flag {
+	OVERWRITE,
+	APPEND,
+	NONE
+} Flag;
 
 int status;
 
@@ -45,18 +50,158 @@ getparam(char *command, char **argv, int len, const char *sep) {
 }
 
 int
+redirect(char *command, char *infile, char *outfile, char **argv, size_t len, Flag* flag) {
+	char *p = command, *q = command;
+	int i = 0, isin = 0, isout = 0;
+	infile[0] = '\0';
+	outfile[0] = '\0';
+
+	while (p[0] != '\0' && q[0] != '\0' && i < (signed int)len) {
+		if (q[0] == '<') {
+			isin = 1;
+			q[0] = '\0';
+
+			if (strlen(p) > 0) {
+				while (p[0] == ' ' || p[0] == '\t') p++;
+				while (p[strlen(p) - 1] == ' ') p[strlen(p) - 1] = '\0';
+			}
+
+			if (strlen(p) > 0) {
+				if (isout) {
+					(void)strlcpy(outfile, p, strlen(p) + 1);
+					isout = 0;
+				} else {
+					argv[i++] = p;
+				}
+			}
+			p = q + 1;
+		} else if (q[0] == '>') {
+			isout = 1;
+			q[0] = '\0';
+
+			if (strlen(p) > 0) {
+				while (p[0] == ' ' || p[0] == '\t') p++;
+				while (p[strlen(p) - 1] == ' ') p[strlen(p) - 1] = '\0';
+			} else {
+				if (isin) return -1;
+			}
+
+			if (strlen(p) > 0) {
+				if (isin) {
+					(void)strlcpy(infile, p, strlen(p) + 1);
+					isin = 0;
+				} else {
+					argv[i++] = p;
+				}
+			} else {
+				if (isin) return -1;
+			}
+
+			if (q+1 != NULL) {
+				if (q[1] == '>') {
+					*flag = APPEND;
+					q++;
+				} else {
+					*flag = OVERWRITE;
+				}
+			} else {
+				return -1;
+			}
+			p = q + 1;
+		} else if (q[0] == ' ') {
+			q[0] = '\0';
+
+			if (strlen(p) > 0) {
+				while (p[0] == ' ' || p[0] == '\t') p++;
+				while (p[strlen(p) - 1] == ' ') p[strlen(p) - 1] = '\0';
+			}
+
+			if (strlen(p) > 0) {
+				if (isout) {
+					(void)strlcpy(outfile, p, strlen(p) + 1);
+					isout = 0;
+				} else if (isin) {
+					(void)strlcpy(infile, p, strlen(p) + 1);
+					isin = 0;
+				} else {
+					argv[i++] = p;
+				}
+			}
+			p = q + 1;	
+		}
+		
+		q++;
+	}
+
+	if (isout + isin == 2) return -1;
+
+	if (strlen(p) > 0) {
+		if (isin) {
+			(void)strlcpy(infile, p, strlen(p) + 1);
+		} else if (isout) {
+			(void)strlcpy(outfile, p, strlen(p) + 1);
+		} else {
+			argv[i++] = p;
+		}
+	}
+
+	argv[i] = NULL;
+	return 0;
+}
+
+
+
+int
 execute(char *command, int in, int out) {
 	pid_t pid;
-	char *args[MAXTOKENS];
+	char *args[MAXTOKENS], infile[MAXPATHLEN], outfile[MAXPATHLEN];
+	int infd = -1, outfd = -1, oflag;
+	Flag flag = NONE;
 
-    if (getparam(command, args, MAXTOKENS, " ") == -1) {
-		perror("Invalid syntax: too many arguments\n");
-		return ERROR;
+	if (redirect(command, infile, outfile, args, MAXTOKENS, &flag) == -1) {
+		perror("Invalid syntax for redirection\n");
+		return EXIT_FAILURE;
 	}
+
 
 	if ((pid = fork()) == -1) {
 		fprintf(stderr, "sish: can't fork: %s\n", strerror(errno));
 	} else if (pid == 0) {
+		if (strlen(infile) > 0) {
+			if ((infd = open(infile, O_RDONLY)) == -1) {
+				fprintf(stderr, "failed to open %s: %s\n", infile, strerror(errno));
+				return ERROR;
+			}
+
+			if (dup2(infd, in) == -1) {
+				fprintf(stderr, "failed to dup: %s\n", strerror(errno));
+				return EXIT_FAILURE;
+			}
+
+			(void)close(infd);
+		}
+
+		if (strlen(outfile) > 0) {
+			oflag = O_CREAT|O_WRONLY;
+			if (flag == APPEND) {
+				oflag = oflag|O_APPEND;
+			} else {
+				oflag = oflag|O_TRUNC;
+			}
+
+			if ((outfd = open(outfile, oflag, UMASK)) == -1) {
+				fprintf(stderr, "failed to open %s: %s\n", infile, strerror(errno));
+				return ERROR;
+			}
+
+			if (dup2(outfd, out) == -1) {
+				fprintf(stderr, "failed to dup: %s\n", strerror(errno));
+				return EXIT_FAILURE;
+			}
+
+			(void)close(outfd);
+		}
+
 		if (in != STDIN_FILENO) {
 			if (dup2(in, STDIN_FILENO) == -1) {
 				perror("dup failed during execution\n");
@@ -73,6 +218,7 @@ execute(char *command, int in, int out) {
 			(void)close(out);
 		}
 
+
 		execvp(args[0], args);
 		fprintf(stderr, "sish: couldn't exec %s: %s\n", command, strerror(errno));
 		exit(ERROR);
@@ -82,12 +228,6 @@ execute(char *command, int in, int out) {
 		perror("failed at wait\n");
 		status = ERROR;
 	}
-//	if (out == STDOUT_FILENO) {
-//		if (wait(&status) == -1) {
-//			perror("failed at wait\n");
-//			status = ERROR;
-//		}
-//	}
 
 	if (status != EXIT_SUCCESS) {
 		status = ERROR;
@@ -123,6 +263,7 @@ cd(char *path) {
 int
 echo(char *str) {
 	char *left;
+	char message[BUFSIZ];
 
 	if (strchr(str, '>') != NULL) {
 		int fd;
@@ -131,6 +272,8 @@ echo(char *str) {
 		left = strsep(&str, ">");
 
 		while (left[strlen(left) - 1] == ' ') left[strlen(left) - 1] = '\0';
+		while (left[0] == ' ') left++;
+
 		(void)dollar(&left);
 
 		if (str == NULL) {
@@ -162,8 +305,8 @@ echo(char *str) {
 			return EXIT_FAILURE;
 		}
 	
-		(void)strlcat(str, "\n", 2);
-		if (write(fd, left, strlen(left)) != (signed int)strlen(left)) {
+		(void)snprintf(message, BUFSIZ, "%s\n", left);
+		if (write(fd, message, strlen(message)) != (signed int)strlen(message)) {
 			fprintf(stderr, "error writing to %s: %s\n", str, strerror(errno));
 			return EXIT_FAILURE;
 		}

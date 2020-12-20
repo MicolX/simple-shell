@@ -51,12 +51,13 @@ main(int argc, char **argv) {
 		exit(EXIT_SUCCESS);
 	}
 
-	while (getinput(buf, BUFSIZ)) {
+	while (getinput(buf, sizeof(buf))) {
 		if (strlen(buf) == 1) continue;
 
 		char *pipes[MAXTOKENS];
 
 		buf[strlen(buf)-1] = '\0';
+		while (buf[strlen(buf) - 1] == ' ') buf[strlen(buf) - 1] = '\0';
 
 		if ((pcount = getparam(buf, pipes, MAXTOKENS, "|")) == -1) {
 			perror("command is too long\n");

@@ -1,3 +1,4 @@
+#include <sys/param.h>
 #include <sys/wait.h>
 
 #include <err.h>
@@ -14,6 +15,7 @@
 
 #define ERROR 127
 #define MAXTOKENS 128
+#define UMASK 0664
 
 extern int status;
 
