@@ -18,8 +18,12 @@ right way to do it
 ---- 12.19.2020 ----
 1. Through so many hours, I finally got the pipes done!!!! Exciting!!
 
----- 12.21.2020 ----
+---- 12.20.2020 ----
 1. implemented redirect and it works fine with pipelines
 2. left to be done: 
 	- return correct status code
 	- backgrounding
+
+---- 12.21.2020 ----
+1. implemented backgrounding
+2. left to be done: return correct status code

@@ -146,7 +146,7 @@ redirect(char *command, char *infile, char *outfile, char **argv, size_t len, Fl
 	}
 
 	argv[i] = NULL;
-	return 0;
+	return i;
 }
 
 
@@ -155,14 +155,18 @@ int
 execute(char *command, int in, int out) {
 	pid_t pid;
 	char *args[MAXTOKENS], infile[MAXPATHLEN], outfile[MAXPATHLEN];
-	int infd = -1, outfd = -1, oflag;
+	int infd = -1, outfd = -1, oflag, argc, wopt = WALLSIG;
 	Flag flag = NONE;
 
-	if (redirect(command, infile, outfile, args, MAXTOKENS, &flag) == -1) {
+	if ((argc = redirect(command, infile, outfile, args, MAXTOKENS, &flag)) == -1) {
 		perror("Invalid syntax for redirection\n");
 		return EXIT_FAILURE;
 	}
 
+	if (strcmp(args[argc - 1], "&") == 0) {
+		wopt = WNOHANG;
+		args[--argc] = NULL;
+	}
 
 	if ((pid = fork()) == -1) {
 		fprintf(stderr, "sish: can't fork: %s\n", strerror(errno));
@@ -217,14 +221,19 @@ execute(char *command, int in, int out) {
 			}
 			(void)close(out);
 		}
-
+		
+		if (wopt == WNOHANG) {
+			if (setpgid(0, 0) == -1) {
+				err(EXIT_FAILURE, "failed to run in background: %s\n", strerror(errno));
+			}
+		}
 
 		execvp(args[0], args);
 		fprintf(stderr, "sish: couldn't exec %s: %s\n", command, strerror(errno));
 		exit(ERROR);
 	}
 
-	if (wait(&status) == -1) {
+	if (waitpid(pid, &status, wopt) == -1) {
 		perror("failed at wait\n");
 		status = ERROR;
 	}
