@@ -149,7 +149,22 @@ redirect(char *command, char *infile, char *outfile, char **argv, size_t len, Fl
 	return i;
 }
 
+void
+child(int signo) {
+	pid_t pid;
+	int stat;
+	
+	(void)signo;
 
+	while (1) {
+		pid = waitpid(WAIT_ANY, &stat, WNOHANG);
+		if (pid <= 0) break;
+	}
+
+	if (signal(SIGCHLD, SIG_IGN) == SIG_ERR) {
+		err(EXIT_FAILURE, "failed to set SIG_DFL to SIGCHLD signal\n");
+	}
+}
 
 int
 execute(char *command, int in, int out) {
@@ -166,6 +181,9 @@ execute(char *command, int in, int out) {
 	if (strcmp(args[argc - 1], "&") == 0) {
 		wopt = WNOHANG;
 		args[--argc] = NULL;
+		if (signal(SIGCHLD, child) == SIG_ERR) {
+			err(EXIT_FAILURE, "failed to set SIG_IGN to SIGCHLD signal\n");
+		}
 	}
 
 	if ((pid = fork()) == -1) {
@@ -173,13 +191,11 @@ execute(char *command, int in, int out) {
 	} else if (pid == 0) {
 		if (strlen(infile) > 0) {
 			if ((infd = open(infile, O_RDONLY)) == -1) {
-				fprintf(stderr, "failed to open %s: %s\n", infile, strerror(errno));
-				return ERROR;
+				err(ERROR, "failed to open %s: %s\n", infile, strerror(errno));
 			}
 
 			if (dup2(infd, in) == -1) {
-				fprintf(stderr, "failed to dup: %s\n", strerror(errno));
-				return EXIT_FAILURE;
+				err(ERROR, "failed to dup: %s\n", strerror(errno));
 			}
 
 			(void)close(infd);
@@ -194,13 +210,11 @@ execute(char *command, int in, int out) {
 			}
 
 			if ((outfd = open(outfile, oflag, UMASK)) == -1) {
-				fprintf(stderr, "failed to open %s: %s\n", infile, strerror(errno));
-				return ERROR;
+				err(ERROR, "failed to open %s: %s\n", infile, strerror(errno));
 			}
 
 			if (dup2(outfd, out) == -1) {
-				fprintf(stderr, "failed to dup: %s\n", strerror(errno));
-				return EXIT_FAILURE;
+				err(ERROR, "failed to dup: %s\n", strerror(errno));
 			}
 
 			(void)close(outfd);
@@ -208,20 +222,18 @@ execute(char *command, int in, int out) {
 
 		if (in != STDIN_FILENO) {
 			if (dup2(in, STDIN_FILENO) == -1) {
-				perror("dup failed during execution\n");
-				exit(ERROR);
+				err(ERROR, "dup failed during execution\n");
 			}
 			(void)close(in);
 		}
 
 		if (out != STDOUT_FILENO) {
 			if (dup2(out, STDOUT_FILENO) == -1) {
-				perror("dup failed during execution\n");
-				exit(ERROR);
+				err(ERROR, "dup failed during execution\n");
 			}
 			(void)close(out);
 		}
-		
+
 		if (wopt == WNOHANG) {
 			if (setpgid(0, 0) == -1) {
 				err(EXIT_FAILURE, "failed to run in background: %s\n", strerror(errno));
@@ -233,16 +245,20 @@ execute(char *command, int in, int out) {
 		exit(ERROR);
 	}
 
-	if (waitpid(pid, &status, wopt) == -1) {
-		perror("failed at wait\n");
-		status = ERROR;
+	if (wopt == WALLSIG) {
+		if (waitpid(pid, &status, wopt) == -1) {
+			if (errno != ECHILD) {
+				fprintf(stderr, "failed at wait: %s\n", strerror(errno));
+				exit(EXIT_FAILURE);
+			}
+		}
 	}
 
-	if (status != EXIT_SUCCESS) {
-		status = ERROR;
+	if (WIFEXITED(status)) {
+		return WEXITSTATUS(status);
 	}
 
-	return status;
+	return ERROR;
 }
 
 int
